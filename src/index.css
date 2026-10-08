@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Baris ini wajib ditambah agar Dark Mode bisa dikontrol pakai tombol */
+@variant dark (&:where(.dark, .dark *));
