@@ -6,8 +6,10 @@ import {
   Trash2, Edit3, Eye, QrCode, Banknote, ArrowRightLeft, Camera,
   PiggyBank, CircleDollarSign, CalendarDays, CreditCard, ChevronDown,
   Sparkles, ArrowDownLeft, ArrowUpRight, MoreHorizontal, CheckCircle2,
-  Delete, ReceiptText, Sun, Moon, Mail, Lock, Loader2
+  Delete, ReceiptText, Sun, Moon, Mail, Lock, Loader2, Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient'; // KONEKSI SUPABASE
 
@@ -325,6 +327,135 @@ export default function App() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (transactions.length === 0) {
+      alert("Belum ada transaksi untuk diekspor!");
+      return;
+    }
+    
+    const doc = new jsPDF();
+    
+    // ==========================================
+    // 1. HEADER (Dark Blue / Slate 900)
+    // ==========================================
+    doc.setFillColor(15, 23, 42); 
+    doc.rect(0, 0, 210, 40, 'F'); // Menggambar blok warna di atas
+    
+    // Teks Header
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("TabunganKU", 14, 24);
+    
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("E-STATEMENT", 170, 24);
+    
+    // ==========================================
+    // 2. INFO PENGGUNA & PERIODE
+    // ==========================================
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    // Karena session.user.email tersedia, kita tampilkan email pemiliknya
+    doc.text(`Akun: ${session?.user?.email || 'Tamu'}`, 14, 50);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, 14, 56);
+    
+    // ==========================================
+    // 3. SUMMARY BOX (Ringkasan Saldo)
+    // ==========================================
+    // Hitung total masuk dan keluar untuk diekspor
+    const totalIncomeExport = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+    const totalExpenseExport = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+    
+    // Gambar kotak abu-abu muda berujung tumpul
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(14, 64, 182, 24, 3, 3, 'F');
+    
+    // Teks Pemasukan (Kiri)
+    doc.setFontSize(10);
+    doc.text("Total Pemasukan:", 20, 72);
+    doc.setTextColor(16, 185, 129); // Emerald 500 (Hijau)
+    doc.setFont("helvetica", "bold");
+    doc.text(formatRp(totalIncomeExport), 20, 80);
+    
+    // Teks Pengeluaran (Tengah)
+    doc.setTextColor(15, 23, 42);
+    doc.setFont("helvetica", "normal");
+    doc.text("Total Pengeluaran:", 100, 72);
+    doc.setTextColor(244, 63, 94); // Rose 500 (Merah)
+    doc.setFont("helvetica", "bold");
+    doc.text(formatRp(totalExpenseExport), 100, 80);
+    
+    // ==========================================
+    // 4. TABEL TRANSAKSI AESTHETIC
+    // ==========================================
+    const tableColumn = ["Tanggal", "Kategori", "Metode", "Catatan", "Nominal"];
+    const tableRows = [];
+
+    // Urutkan dari yang terbaru di atas
+    const sortedTxs = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    sortedTxs.forEach(tx => {
+      tableRows.push([
+        new Date(tx.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }),
+        tx.category,
+        tx.paymentMethod.toUpperCase(),
+        tx.note,
+        // Sisipkan tipe untuk cek warna nanti
+        tx.type === 'expense' ? `-${formatRp(tx.amount)}` : `+${formatRp(tx.amount)}`
+      ]);
+    });
+
+    doc.autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 96,
+      theme: 'plain', // Hapus kotak-kotak tabel bawaan
+      styles: { 
+        fontSize: 9, 
+        cellPadding: 5,
+        font: 'helvetica'
+      },
+      headStyles: { 
+        fillColor: [248, 250, 252], // Warna header abu-abu super terang
+        textColor: [100, 116, 139], // Slate 500
+        fontStyle: 'bold', 
+        lineWidth: { bottom: 0.5 }, 
+        lineColor: [226, 232, 240] // Garis bawah tipis
+      },
+      bodyStyles: { 
+        lineWidth: { bottom: 0.1 }, 
+        lineColor: [241, 245, 249] // Garis pemisah antar baris sangat tipis
+      },
+      // LOGIKA WARNA ANGKA OTOMATIS
+      didParseCell: function(data) {
+         if (data.section === 'body' && data.column.index === 4) { // Kolom Nominal
+             const val = data.row.raw[4];
+             if (val.startsWith('-')) {
+                 data.cell.styles.textColor = [244, 63, 94]; // Merah untuk pengeluaran
+             } else {
+                 data.cell.styles.textColor = [16, 185, 129]; // Hijau untuk pemasukan
+             }
+             data.cell.styles.fontStyle = 'bold';
+         }
+      }
+    });
+    
+    // ==========================================
+    // 5. FOOTER
+    // ==========================================
+    const finalY = doc.lastAutoTable.finalY || 100;
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184); // Slate 400
+    doc.text("Laporan ini di-generate otomatis oleh sistem TabunganKU.", 14, finalY + 15);
+    
+    // Unduh File
+    doc.save("E-Statement_TabunganKU.pdf");
+  };
+
   // --- LOGIKA SWIPE GESTURE ---
   const handlePointerDown = (e, trx) => {
     pointerStartX.current = e.clientX;
@@ -526,9 +657,14 @@ export default function App() {
               <div className="animate-in fade-in slide-in-from-right-4 duration-500 space-y-6">
                 <div className="flex justify-between items-center mb-4 mt-4 md:mt-0">
                   <h2 className="text-2xl font-bold">Riwayat Transaksi</h2>
-                  <button onClick={() => setIsDarkMode(!isDarkMode)} className="md:hidden w-10 h-10 rounded-xl bg-white dark:bg-[#0E1A30] border border-gray-100 dark:border-slate-800 flex items-center justify-center text-gray-500 shadow-sm transition-all active:scale-95">
-                     {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-blue-500" />}
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={handleExportPDF} className="flex items-center gap-2 px-3 py-2 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 rounded-xl font-bold text-sm hover:bg-emerald-200 dark:hover:bg-emerald-500/20 transition-all active:scale-95">
+                      <Download size={16} /> <span className="hidden md:inline">Export PDF</span>
+                    </button>
+                    <button onClick={() => setIsDarkMode(!isDarkMode)} className="md:hidden w-10 h-10 rounded-xl bg-white dark:bg-[#0E1A30] border border-gray-100 dark:border-slate-800 flex items-center justify-center text-gray-500 shadow-sm transition-all active:scale-95">
+                       {isDarkMode ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-blue-500" />}
+                    </button>
+                  </div>
                 </div>
                 
                 {Object.keys(groupedByMonth).length === 0 ? (
