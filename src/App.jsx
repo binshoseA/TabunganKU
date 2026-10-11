@@ -9,7 +9,7 @@ import {
   Delete, ReceiptText, Sun, Moon, Mail, Lock, Loader2, Download
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable'; // FIX ERROR EXPORT PDF
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { supabase } from './supabaseClient'; // KONEKSI SUPABASE
 
@@ -20,11 +20,24 @@ const formatRp = (angka) => {
   return "Rp. " + new Intl.NumberFormat('id-ID').format(angka) + ",00";
 };
 
+// --- DAFTAR BANK & E-WALLET KUSTOM ---
+const BANKS = [
+  { id: 'bni', label: 'BNI', icon: CreditCard, sub: 'Bank BNI' },
+  { id: 'blu', label: 'blu BCA', icon: CreditCard, sub: 'BCA Digital' },
+  { id: 'jago', label: 'Bank Jago', icon: CreditCard, sub: 'Bank Jago' },
+  { id: 'mandiri', label: 'Mandiri', icon: CreditCard, sub: 'Bank Mandiri' },
+  { id: 'seabank', label: 'SeaBank', icon: CreditCard, sub: 'SeaBank' },
+  { id: 'dana', label: 'DANA', icon: Wallet, sub: 'E-Wallet' },
+  { id: 'gopay', label: 'GoPay', icon: Wallet, sub: 'E-Wallet' },
+  { id: 'shopeepay', label: 'ShopeePay', icon: Wallet, sub: 'E-Wallet' }
+];
+
+const getMethodLabel = (id) => BANKS.find(b => b.id === id)?.label || id.toUpperCase();
+
 const MethodIcon = ({ method, size = 16, className = "" }) => {
-  if (method === 'qris') return <QrCode size={size} className={className} />;
-  if (method === 'cash') return <Banknote size={size} className={className} />;
-  if (method === 'transfer') return <ArrowRightLeft size={size} className={className} />;
-  return null;
+  const ewallets = ['dana', 'gopay', 'shopeepay'];
+  if (ewallets.includes(method)) return <Wallet size={size} className={className} />;
+  return <CreditCard size={size} className={className} />;
 };
 
 export default function App() {
@@ -58,7 +71,7 @@ export default function App() {
   const [paymentMenuOpen, setPaymentMenuOpen] = useState(false);
   
   const [addForm, setAddForm] = useState({
-    type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'qris', category: 'Lainnya', note: '', receipt: null
+    type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'bni', category: 'Lainnya', note: '', receipt: null
   });
 
   // --- CEK SESI LOGIN & TARIK DATA DARI SUPABASE ---
@@ -74,7 +87,7 @@ export default function App() {
       if (session) {
         fetchTransactions(session.user.id);
       } else {
-        setTransactions([]); // Kosongkan layar jika logout
+        setTransactions([]); 
       }
     });
 
@@ -91,7 +104,6 @@ export default function App() {
     if (error) {
       console.error('Error fetching transactions:', error);
     } else {
-      // Normalisasi format camelCase untuk UI React
       const formattedData = data.map(tx => ({
         ...tx,
         paymentMethod: tx.payment_method
@@ -100,37 +112,27 @@ export default function App() {
     }
   };
 
-  // --- FUNGSI LOGIN & REGISTER ---
   const handleAuth = async (e) => {
     e.preventDefault();
     setIsAuthLoading(true);
-    
     if (isLoginMode) {
       const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (error) alert(error.message);
     } else {
       const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      if (error) {
-        alert(error.message);
-      } else {
-        alert("Pendaftaran berhasil! Jika perlu verifikasi, silakan cek email Anda.");
-        setIsLoginMode(true);
-      }
+      if (error) alert(error.message);
+      else { alert("Pendaftaran berhasil!"); setIsLoginMode(true); }
     }
     setIsAuthLoading(false);
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
+  const handleLogout = async () => { await supabase.auth.signOut(); };
 
-  // --- LOGIKA DARK/LIGHT MODE ROOT ---
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
-  // --- FITUR KEYBOARD ---
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!isAddSheetOpen) return;
@@ -158,18 +160,20 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAddSheetOpen, addForm]);
 
+  // --- KALKULASI SALDO TIAP BANK (DINAMIS) ---
   const { totalBalance, income, expense, methods } = useMemo(() => {
+    const initialMethods = { dana: 0, gopay: 0, shopeepay: 0, seabank: 0, jago: 0, blu: 0, bni: 0, mandiri: 0 };
     return transactions.reduce((acc, tx) => {
+      const amt = Number(tx.amount) || 0;
       if (tx.type === 'income') {
-        acc.totalBalance += Number(tx.amount); acc.income += Number(tx.amount);
+        acc.totalBalance += amt; acc.income += amt;
+        acc.methods[tx.paymentMethod] = (acc.methods[tx.paymentMethod] || 0) + amt; // Saldo Bank Nambah
       } else {
-        acc.totalBalance -= Number(tx.amount); acc.expense += Number(tx.amount);
-      }
-      if (acc.methods[tx.paymentMethod] !== undefined) {
-        acc.methods[tx.paymentMethod] += Number(tx.amount);
+        acc.totalBalance -= amt; acc.expense += amt;
+        acc.methods[tx.paymentMethod] = (acc.methods[tx.paymentMethod] || 0) - amt; // Saldo Bank Berkurang
       }
       return acc;
-    }, { totalBalance: 0, income: 0, expense: 0, methods: { qris: 0, cash: 0, transfer: 0 } });
+    }, { totalBalance: 0, income: 0, expense: 0, methods: initialMethods });
   }, [transactions]);
 
   const chartData = useMemo(() => {
@@ -249,13 +253,12 @@ export default function App() {
     return groups;
   }, [transactions]);
 
-  // --- SIMPAN KE SUPABASE DB ---
   const handleSave = async () => {
     if (!addForm.amount || parseInt(addForm.amount) <= 0) return alert("Nominal tidak valid!");
     if (!addForm.note || addForm.note.trim() === '') return alert("Catatan transaksi wajib diisi!");
 
     const payload = {
-      user_id: session.user.id, // Ikatkan dengan akun yang sedang login!
+      user_id: session.user.id,
       type: addForm.type,
       amount: parseInt(addForm.amount, 10),
       date: addForm.date,
@@ -266,444 +269,167 @@ export default function App() {
 
     try {
       if (addForm.id) {
-        // Mode Edit
-        const { data, error } = await supabase
-          .from('transactions')
-          .update(payload)
-          .eq('id', addForm.id)
-          .select()
-          .single();
+        const { data, error } = await supabase.from('transactions').update(payload).eq('id', addForm.id).select().single();
         if (error) throw error;
-        const newTx = { ...data, paymentMethod: data.payment_method };
-        setTransactions(prev => prev.map(t => t.id === addForm.id ? newTx : t));
+        setTransactions(prev => prev.map(t => t.id === addForm.id ? { ...data, paymentMethod: data.payment_method } : t));
       } else {
-        // Mode Tambah Baru
-        const { data, error } = await supabase
-          .from('transactions')
-          .insert([payload])
-          .select()
-          .single();
+        const { data, error } = await supabase.from('transactions').insert([payload]).select().single();
         if (error) throw error;
-        const newTx = { ...data, paymentMethod: data.payment_method };
-        setTransactions(prev => [newTx, ...prev]);
+        setTransactions(prev => [{ ...data, paymentMethod: data.payment_method }, ...prev]);
       }
-      
       setIsAddSheetOpen(false);
-      setAddForm({ type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'qris', category: 'Lainnya', note: '', receipt: null });
+      setAddForm({ type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'bni', category: 'Lainnya', note: '', receipt: null });
       setSaveFeedback('Transaksi berhasil disimpan');
       setTimeout(() => setSaveFeedback(null), 1800);
-      
     } catch (error) {
-      console.error("Error simpan ke Supabase:", error);
-      alert("Gagal menyimpan ke database. Cek koneksi internet.");
+      console.error(error); alert("Gagal menyimpan ke database.");
     }
   };
 
-  const requestDelete = (trx) => {
-    setActionModalTx(null);
-    setConfirmDeleteTx(trx);
-  };
+  const requestDelete = (trx) => { setActionModalTx(null); setConfirmDeleteTx(trx); };
 
-  // --- HAPUS DARI SUPABASE DB ---
   const handleDelete = async (id) => {
-    setConfirmDeleteTx(null);
-    setSwipedTxId(null);
-    setDeletingTxId(id);
-    
+    setConfirmDeleteTx(null); setSwipedTxId(null); setDeletingTxId(id);
     try {
       const { error } = await supabase.from('transactions').delete().eq('id', id);
       if (error) throw error;
-
       setTimeout(() => {
         setTransactions(prev => prev.filter(t => t.id !== id));
-        setDeletingTxId(null);
-        setSaveFeedback('Transaksi berhasil dihapus');
+        setDeletingTxId(null); setSaveFeedback('Transaksi berhasil dihapus');
         setTimeout(() => setSaveFeedback(null), 1800);
       }, 450);
-    } catch (error) {
-      setDeletingTxId(null);
-      alert("Gagal menghapus dari database.");
-      console.error(error);
-    }
+    } catch (error) { setDeletingTxId(null); alert("Gagal menghapus."); }
   };
 
-  
-const handleExportPDF = () => {
-  if (!transactions.length) {
-    alert("Belum ada transaksi untuk diekspor!");
-    return;
-  }
+  // --- FUNGSI EXPORT PDF YG SUDAH DIPERBAIKI ---
+  const handleExportPDF = () => {
+    if (!transactions.length) {
+      alert("Belum ada transaksi untuk diekspor!");
+      return;
+    }
 
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-    compress: true,
-  });
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
 
-  const W = 210;
-  const H = 297;
-  const M = 15;
-  const contentW = W - M * 2;
+    const W = 210, H = 297, M = 15, contentW = W - M * 2;
+    const navy = [11, 21, 42], blue = [59, 130, 246], muted = [100, 116, 139];
+    const light = [248, 250, 252], border = [226, 232, 240];
+    const green = [5, 150, 105], red = [225, 70, 95], white = [255, 255, 255];
 
-  // Palette
-  const navy = [11, 21, 42];
-  const blue = [59, 130, 246];
-  const muted = [100, 116, 139];
-  const light = [248, 250, 252];
-  const border = [226, 232, 240];
-  const green = [5, 150, 105];
-  const red = [225, 70, 95];
-  const white = [255, 255, 255];
+    const money = (value) => "Rp " + new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(Number(value) || 0);
 
-  const money = (value) =>
-    "Rp " +
-    new Intl.NumberFormat("id-ID", {
-      maximumFractionDigits: 0,
-    }).format(Number(value) || 0);
+    const dateLabel = (value, options = {}) => {
+      const date = new Date(`${value}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return "-";
+      return date.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", ...options });
+    };
 
-  const dateLabel = (value, options = {}) => {
-    const date = new Date(`${value}T00:00:00`);
-    if (Number.isNaN(date.getTime())) return "-";
+    const now = new Date();
+    const printedAt = now.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
-    return date.toLocaleDateString("id-ID", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      ...options,
+    const sorted = [...transactions].sort((a, b) => {
+      const dateDiff = new Date(b.date) - new Date(a.date);
+      if (dateDiff !== 0) return dateDiff;
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
-  };
 
-  const now = new Date();
-  const printedAt = now.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+    const totalIncome = transactions.reduce((sum, tx) => sum + (tx.type === "income" ? Number(tx.amount) || 0 : 0), 0);
+    const totalExpense = transactions.reduce((sum, tx) => sum + (tx.type === "expense" ? Number(tx.amount) || 0 : 0), 0);
+    const balance = totalIncome - totalExpense;
+    const owner = session?.user?.email || "Pengguna TabunganKU";
 
-  const sorted = [...transactions].sort((a, b) => {
-    const dateDiff = new Date(b.date) - new Date(a.date);
-    if (dateDiff !== 0) return dateDiff;
+    // HEADER
+    doc.setFillColor(...navy); doc.rect(0, 0, W, 66, "F");
+    doc.setFillColor(...blue); doc.roundedRect(M, 13, 2, 10, 1, 1, "F");
+    doc.setTextColor(...white); doc.setFont("helvetica", "bold"); doc.setFontSize(17); doc.text("TabunganKU", M + 6, 19);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(190, 205, 226); doc.text("PERSONAL FINANCE", M + 6, 25);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(...white); doc.text("E-STATEMENT", W - M, 17, { align: "right" });
+    doc.setFont("helvetica", "normal"); doc.setTextColor(190, 205, 226); doc.text(printedAt, W - M, 23, { align: "right" });
+    doc.setTextColor(...white); doc.setFont("helvetica", "bold"); doc.setFontSize(23); doc.text("Your money,", M, 43); doc.text("in focus.", M, 53);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(190, 205, 226); doc.text("Ringkasan perjalanan finansialmu.", M, 60);
 
-    return String(b.created_at || "").localeCompare(
-      String(a.created_at || "")
-    );
-  });
+    // ACCOUNT INFO
+    doc.setTextColor(...muted); doc.setFontSize(8); doc.text("PEMILIK AKUN", M, 77);
+    doc.setTextColor(...navy); doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+    doc.text(doc.splitTextToSize(owner, contentW), M, 83);
 
-  const totalIncome = transactions.reduce(
-    (sum, tx) =>
-      sum + (tx.type === "income" ? Number(tx.amount) || 0 : 0),
-    0
-  );
+    // BALANCE CARD
+    const cardY = 92, cardH = 35;
+    doc.setFillColor(...navy); doc.roundedRect(M, cardY, contentW, cardH, 4, 4, "F");
+    doc.setFillColor(...blue); doc.roundedRect(M + 5, cardY + 7, 1.2, 19, 0.6, 0.6, "F");
+    doc.setTextColor(190, 205, 226); doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.text("SALDO BERSIH", M + 11, cardY + 10);
+    doc.setTextColor(...white); doc.setFontSize(20);
+    doc.text(money(balance), M + 11, cardY + 23);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(190, 205, 226); doc.text(`${transactions.length} transaksi tercatat`, W - M - 5, cardY + 29, { align: "right" });
 
-  const totalExpense = transactions.reduce(
-    (sum, tx) =>
-      sum + (tx.type === "expense" ? Number(tx.amount) || 0 : 0),
-    0
-  );
+    // INCOME / EXPENSE CARDS
+    const smallW = (contentW - 5) / 2, smallY = 134, smallH = 28;
+    const summaryCard = (x, label, amount, color) => {
+      doc.setFillColor(...light); doc.roundedRect(x, smallY, smallW, smallH, 3, 3, "F");
+      doc.setFillColor(...color); doc.circle(x + 5, smallY + 7, 1.2, "F");
+      doc.setTextColor(...muted); doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.text(label, x + 9, smallY + 8);
+      doc.setTextColor(...color); doc.setFontSize(12); doc.text(money(amount), x + 5, smallY + 20);
+    };
+    summaryCard(M, "TOTAL PEMASUKAN", totalIncome, green);
+    summaryCard(M + smallW + 5, "TOTAL PENGELUARAN", totalExpense, red);
 
-  const balance = totalIncome - totalExpense;
-  const owner = session?.user?.email || "Pengguna TabunganKU";
+    // HISTORY HEADER
+    const sectionY = 174;
+    doc.setTextColor(...navy); doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Transaction history", M, sectionY);
+    doc.setTextColor(...muted); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.text("Seluruh aktivitas keuangan", M, sectionY + 6);
+    doc.setDrawColor(...blue); doc.setLineWidth(0.7); doc.line(M, sectionY + 10, M + 18, sectionY + 10);
 
-  // ===== HEADER =====
-  doc.setFillColor(...navy);
-  doc.rect(0, 0, W, 66, "F");
-
-  // Decorative accent
-  doc.setFillColor(...blue);
-  doc.roundedRect(M, 13, 2, 10, 1, 1, "F");
-
-  doc.setTextColor(...white);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.text("TabunganKU", M + 6, 19);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(190, 205, 226);
-  doc.text("PERSONAL FINANCE", M + 6, 25);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.setTextColor(...white);
-  doc.text("E-STATEMENT", W - M, 17, { align: "right" });
-
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(190, 205, 226);
-  doc.text(printedAt, W - M, 23, { align: "right" });
-
-  doc.setTextColor(...white);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(23);
-  doc.text("Your money,", M, 43);
-  doc.text("in focus.", M, 53);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(190, 205, 226);
-  doc.text("Ringkasan perjalanan finansialmu.", M, 60);
-
-  // ===== ACCOUNT INFO =====
-  doc.setTextColor(...muted);
-  doc.setFontSize(8);
-  doc.text("PEMILIK AKUN", M, 77);
-  doc.setTextColor(...navy);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-
-  const ownerLines = doc.splitTextToSize(owner, contentW);
-  doc.text(ownerLines, M, 83);
-
-  // ===== BALANCE CARD =====
-  const cardY = 92;
-  const cardH = 35;
-
-  doc.setFillColor(...navy);
-  doc.roundedRect(M, cardY, contentW, cardH, 4, 4, "F");
-
-  doc.setFillColor(...blue);
-  doc.roundedRect(M + 5, cardY + 7, 1.2, 19, 0.6, 0.6, "F");
-
-  doc.setTextColor(190, 205, 226);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("SALDO BERSIH", M + 11, cardY + 10);
-
-  doc.setTextColor(...white);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-
-  let balanceFontSize = 20;
-  while (
-    doc.getTextWidth(money(balance)) > contentW - 25 &&
-    balanceFontSize > 11
-  ) {
-    balanceFontSize -= 1;
-    doc.setFontSize(balanceFontSize);
-  }
-
-  doc.text(money(balance), M + 11, cardY + 23);
-
-  doc.setTextColor(190, 205, 226);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.text(
-    `${transactions.length} transaksi tercatat`,
-    W - M - 5,
-    cardY + 29,
-    { align: "right" }
-  );
-
-  // ===== INCOME / EXPENSE CARDS =====
-  const gap = 5;
-  const smallW = (contentW - gap) / 2;
-  const smallY = 134;
-  const smallH = 28;
-
-  const summaryCard = (x, label, amount, color) => {
-    doc.setFillColor(...light);
-    doc.roundedRect(x, smallY, smallW, smallH, 3, 3, "F");
-
-    doc.setFillColor(...color);
-    doc.circle(x + 5, smallY + 7, 1.2, "F");
-
-    doc.setTextColor(...muted);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.text(label, x + 9, smallY + 8);
-
-    doc.setTextColor(...color);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-
-    let fs = 12;
-    while (doc.getTextWidth(money(amount)) > smallW - 8 && fs > 8) {
-      fs -= 1;
-      doc.setFontSize(fs);
-    }
-
-    doc.text(money(amount), x + 5, smallY + 20);
-  };
-
-  summaryCard(M, "TOTAL PEMASUKAN", totalIncome, green);
-  summaryCard(
-    M + smallW + gap,
-    "TOTAL PENGELUARAN",
-    totalExpense,
-    red
-  );
-
-  // ===== TRANSACTION HISTORY =====
-  const sectionY = 174;
-
-  doc.setTextColor(...navy);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("Transaction history", M, sectionY);
-
-  doc.setTextColor(...muted);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text(
-    "Seluruh aktivitas keuangan",
-    M,
-    sectionY + 6
-  );
-
-  doc.setDrawColor(...blue);
-  doc.setLineWidth(0.7);
-  doc.line(M, sectionY + 10, M + 18, sectionY + 10);
-
-  const rows = sorted.map((tx) => {
-    const isIncome = tx.type === "income";
-
-    return [
+    const rows = sorted.map((tx) => [
       dateLabel(tx.date, { year: undefined }),
       String(tx.category || "Lainnya"),
       String(tx.note || "-"),
-      String(tx.paymentMethod || tx.payment_method || "-").toUpperCase(),
-      `${isIncome ? "+" : "-"}${money(tx.amount)}`,
-    ];
-  });
+      getMethodLabel(tx.paymentMethod || tx.payment_method).toUpperCase(),
+      `${tx.type === "income" ? "+" : "-"}${money(tx.amount)}`,
+    ]);
 
-  doc.autoTable({
-    startY: sectionY + 15,
-    margin: { left: M, right: M, bottom: 20 },
-    head: [["TANGGAL", "KATEGORI", "CATATAN", "METODE", "NOMINAL"]],
-    body: rows,
-    theme: "plain",
-    showHead: "everyPage",
+    // PERBAIKAN BUG AUTOTABLE DI SINI: autoTable(doc, { ... })
+    autoTable(doc, {
+      startY: sectionY + 15,
+      margin: { left: M, right: M, bottom: 20 },
+      head: [["TANGGAL", "KATEGORI", "CATATAN", "METODE", "NOMINAL"]],
+      body: rows,
+      theme: "plain",
+      showHead: "everyPage",
+      styles: { font: "helvetica", fontSize: 7.5, cellPadding: { top: 4, right: 2, bottom: 4, left: 2 }, textColor: navy, overflow: "linebreak", valign: "middle", lineColor: border, lineWidth: { bottom: 0.15 } },
+      headStyles: { fillColor: light, textColor: muted, fontStyle: "bold", fontSize: 6.5, cellPadding: { top: 4, right: 2, bottom: 4, left: 2 }, lineColor: border, lineWidth: { bottom: 0.5 } },
+      columnStyles: { 0: { cellWidth: 23 }, 1: { cellWidth: 29 }, 2: { cellWidth: 62 }, 3: { cellWidth: 23 }, 4: { cellWidth: 43, halign: "right" } },
+      didParseCell(data) {
+        if (data.section === "body" && data.column.index === 4) {
+          const tx = sorted[data.row.index];
+          data.cell.styles.textColor = tx?.type === "income" ? green : red;
+          data.cell.styles.fontStyle = "bold"; data.cell.styles.fontSize = 7;
+        }
+        if (data.section === "body" && data.column.index === 3) {
+          data.cell.styles.textColor = muted; data.cell.styles.fontSize = 6.5;
+        }
+      },
+      rowPageBreak: "avoid",
+    });
 
-    styles: {
-      font: "helvetica",
-      fontSize: 7.5,
-      cellPadding: { top: 4, right: 2, bottom: 4, left: 2 },
-      textColor: navy,
-      overflow: "linebreak",
-      valign: "middle",
-      lineColor: border,
-      lineWidth: { bottom: 0.15 },
-    },
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(...border); doc.setLineWidth(0.3); doc.line(M, H - 15, W - M, H - 15);
+      doc.setTextColor(...muted); doc.setFont("helvetica", "normal"); doc.setFontSize(7);
+      doc.text("Generated by TabunganKU", M, H - 9);
+      doc.text(`HALAMAN ${page} DARI ${pageCount}`, W - M, H - 9, { align: "right" });
+    }
 
-    headStyles: {
-      fillColor: light,
-      textColor: muted,
-      fontStyle: "bold",
-      fontSize: 6.5,
-      cellPadding: { top: 4, right: 2, bottom: 4, left: 2 },
-      lineColor: border,
-      lineWidth: { bottom: 0.5 },
-    },
-
-    columnStyles: {
-      0: { cellWidth: 23 },
-      1: { cellWidth: 29 },
-      2: { cellWidth: 62 },
-      3: { cellWidth: 23 },
-      4: { cellWidth: 43, halign: "right" },
-    },
-
-    didParseCell(data) {
-      if (data.section === "body" && data.column.index === 4) {
-        const tx = sorted[data.row.index];
-
-        data.cell.styles.textColor =
-          tx?.type === "income" ? green : red;
-
-        data.cell.styles.fontStyle = "bold";
-        data.cell.styles.fontSize = 7;
-      }
-
-      if (data.section === "body" && data.column.index === 3) {
-        data.cell.styles.textColor = muted;
-        data.cell.styles.fontSize = 6.5;
-      }
-    },
-
-    // Hindari memisahkan satu baris transaksi antarhalaman
-    rowPageBreak: "avoid",
-  });
-
-  // ===== FOOTER ON EVERY PAGE =====
-  const pageCount = doc.internal.getNumberOfPages();
-
-  for (let page = 1; page <= pageCount; page++) {
-    doc.setPage(page);
-
-    doc.setDrawColor(...border);
-    doc.setLineWidth(0.3);
-    doc.line(M, H - 15, W - M, H - 15);
-
-    doc.setTextColor(...muted);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-
-    doc.text(
-      "Generated by TabunganKU",
-      M,
-      H - 9
-    );
-
-    doc.text(
-      `HALAMAN ${page} DARI ${pageCount}`,
-      W - M,
-      H - 9,
-      { align: "right" }
-    );
-  }
-
-  doc.save(
-    `E-Statement_TabunganKU_${now.getFullYear()}-${String(
-      now.getMonth() + 1
-    ).padStart(2, "0")}.pdf`
-  );
-};
-
+    doc.save(`E-Statement_TabunganKU_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}.pdf`);
+  };
 
   // --- LOGIKA SWIPE GESTURE ---
-  const handlePointerDown = (e, trx) => {
-    pointerStartX.current = e.clientX;
-    pointerStartY.current = e.clientY;
-    activePointerId.current = e.pointerId;
-    swipeMoved.current = false;
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    startPress(trx);
-  };
-  const handlePointerMove = (e, trx) => {
-    if (pointerStartX.current === null || activePointerId.current !== e.pointerId) return;
-    const dx = pointerStartX.current - e.clientX;
-    const dy = Math.abs(pointerStartY.current - e.clientY);
-    if (Math.abs(dx) > 10 && Math.abs(dx) > dy) {
-      swipeMoved.current = true;
-      endPress();
-      const nextOffset = Math.max(0, Math.min(96, dx));
-      setSwipeOffset(nextOffset);
-      if (nextOffset > 48) setSwipedTxId(trx.id);
-      else if (nextOffset < 20 && swipedTxId === trx.id) setSwipedTxId(null);
-    } else if (dy > 10) { endPress(); }
-  };
-  const handlePointerUp = (e, trx) => {
-    if (activePointerId.current !== e.pointerId) return;
-    endPress();
-    const dx = pointerStartX.current === null ? 0 : pointerStartX.current - e.clientX;
-    const wasHorizontalSwipe = Math.abs(dx) > 10;
-    if (wasHorizontalSwipe) setSwipedTxId(dx > 48 ? trx.id : null);
-    setSwipeOffset(0); pointerStartX.current = null; pointerStartY.current = null; activePointerId.current = null;
-  };
-
-  const handleTransactionClick = (trx) => {
-    if (swipeMoved.current) { swipeMoved.current = false; return; }
-    if (swipedTxId === trx.id) { setSwipedTxId(null); return; }
-    setActionModalTx(trx);
-  };
-  const handleEditClick = (trx) => {
-    setAddForm({ ...trx }); setPaymentMenuOpen(false); setIsAddSheetOpen(true); setActionModalTx(null); setDetailModalTx(null);
-  };
+  const handlePointerDown = (e, trx) => { pointerStartX.current = e.clientX; pointerStartY.current = e.clientY; activePointerId.current = e.pointerId; swipeMoved.current = false; e.currentTarget.setPointerCapture?.(e.pointerId); startPress(trx); };
+  const handlePointerMove = (e, trx) => { if (pointerStartX.current === null || activePointerId.current !== e.pointerId) return; const dx = pointerStartX.current - e.clientX; const dy = Math.abs(pointerStartY.current - e.clientY); if (Math.abs(dx) > 10 && Math.abs(dx) > dy) { swipeMoved.current = true; endPress(); const nextOffset = Math.max(0, Math.min(96, dx)); setSwipeOffset(nextOffset); if (nextOffset > 48) setSwipedTxId(trx.id); else if (nextOffset < 20 && swipedTxId === trx.id) setSwipedTxId(null); } else if (dy > 10) { endPress(); } };
+  const handlePointerUp = (e, trx) => { if (activePointerId.current !== e.pointerId) return; endPress(); const dx = pointerStartX.current === null ? 0 : pointerStartX.current - e.clientX; if (Math.abs(dx) > 10) setSwipedTxId(dx > 48 ? trx.id : null); setSwipeOffset(0); pointerStartX.current = null; pointerStartY.current = null; activePointerId.current = null; };
+  const handleTransactionClick = (trx) => { if (swipeMoved.current) { swipeMoved.current = false; return; } if (swipedTxId === trx.id) { setSwipedTxId(null); return; } setActionModalTx(trx); };
+  const handleEditClick = (trx) => { setAddForm({ ...trx }); setPaymentMenuOpen(false); setIsAddSheetOpen(true); setActionModalTx(null); setDetailModalTx(null); };
   const handleDetailClick = (trx) => { setDetailModalTx(trx); setActionModalTx(null); };
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) setAddForm({ ...addForm, receipt: URL.createObjectURL(file) });
-  };
+  const handleFileChange = (e) => { const file = e.target.files[0]; if (file) setAddForm({ ...addForm, receipt: URL.createObjectURL(file) }); };
 
   const getCategoryMeta = (category) => {
     switch (category) {
@@ -728,33 +454,20 @@ const handleExportPDF = () => {
   };
 
   const openNewTransaction = () => {
-    if (!session) {
-      alert("Silakan Login terlebih dahulu di tab Profil!");
-      setActiveTab('profil');
-      return;
-    }
-    setAddForm({ type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'qris', category: 'Lainnya', note: '', receipt: null });
-    setPaymentMenuOpen(false);
-    setIsAddSheetOpen(true);
+    if (!session) { alert("Silakan Login terlebih dahulu di tab Profil!"); setActiveTab('profil'); return; }
+    setAddForm({ type: 'expense', amount: '', date: new Date().toISOString().split('T')[0], paymentMethod: 'bni', category: 'Lainnya', note: '', receipt: null });
+    setPaymentMenuOpen(false); setIsAddSheetOpen(true);
   };
 
-  const getCategoryIcon = (category, size = 18, className = '') => {
-    const Icon = getCategoryMeta(category).icon;
-    return <Icon size={size} className={className} />;
-  };
+  const getCategoryIcon = (category, size = 18, className = '') => { const Icon = getCategoryMeta(category).icon; return <Icon size={size} className={className} />; };
 
-  let pressTimer;
-  const startPress = (trx) => { pressTimer = setTimeout(() => setActionModalTx(trx), 400); };
-  const endPress = () => { clearTimeout(pressTimer); };
+  let pressTimer; const startPress = (trx) => { pressTimer = setTimeout(() => setActionModalTx(trx), 400); }; const endPress = () => { clearTimeout(pressTimer); };
 
   if (isLoading) {
     return (
       <div className="flex flex-col h-screen w-full bg-[#081021] items-center justify-center text-white relative">
         <style>{`@keyframes dropCoin { 0% { transform: translateY(-60px); opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; transform: translateY(10px); } 100% { transform: translateY(20px); opacity: 0; } } .animate-coin { animation: dropCoin 1.5s infinite cubic-bezier(0.4, 0, 0.2, 1); }`}</style>
-        <div className="relative flex flex-col items-center mb-8">
-          <div className="absolute -top-12 z-10 animate-coin"><CircleDollarSign className="text-yellow-400 bg-[#081021] rounded-full" size={36} /></div>
-          <PiggyBank className="text-pink-400 z-20 relative" size={80} strokeWidth={1.5} />
-        </div>
+        <div className="relative flex flex-col items-center mb-8"><div className="absolute -top-12 z-10 animate-coin"><CircleDollarSign className="text-yellow-400 bg-[#081021] rounded-full" size={36} /></div><PiggyBank className="text-pink-400 z-20 relative" size={80} strokeWidth={1.5} /></div>
         <h1 className="text-3xl font-bold text-white tracking-widest animate-pulse">TabunganKU</h1>
       </div>
     );
@@ -807,12 +520,17 @@ const handleExportPDF = () => {
                 <div className="bg-white dark:bg-[#0E1A30] border border-gray-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm">
                   <p className="text-gray-500 dark:text-gray-400 text-sm mb-2">Total Saldo Aktif</p>
                   <h2 className="text-3xl md:text-4xl font-bold mb-4">{formatRp(totalBalance)}</h2>
-                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-slate-800">
+                  
+                  {/* --- KOTAK-KOTAK SALDO BANK/E-WALLET --- */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-slate-800">
                     {Object.entries(methods).map(([key, val]) => (
-                      <button key={key} onClick={() => setPaymentDetailModal({ isOpen: true, method: key })} className="p-2 text-left hover:bg-gray-50 dark:hover:bg-[#172542] rounded-xl transition-colors group">
-                        <div className="flex justify-between items-center"><div className="flex items-center gap-1.5"><MethodIcon method={key} size={12} className="text-gray-500" /><p className="text-[10px] text-gray-500 uppercase font-semibold">{key}</p></div><ChevronRight size={12} className="opacity-0 group-hover:opacity-100 text-blue-500"/></div>
-                        <p className="font-bold text-xs mt-1 truncate">{formatRp(val)}</p>
-                      </button>
+                      <div key={key} className="p-3 bg-gray-50 dark:bg-[#131F37] rounded-xl border border-gray-100 dark:border-slate-800">
+                        <div className="flex items-center gap-1.5 mb-2">
+                           <MethodIcon method={key} size={14} className="text-blue-500" />
+                           <p className="text-[10px] text-gray-500 uppercase font-bold truncate">{getMethodLabel(key)}</p>
+                        </div>
+                        <p className={`font-bold text-sm truncate ${val < 0 ? 'text-rose-500' : ''}`}>{formatRp(val)}</p>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -909,7 +627,7 @@ const handleExportPDF = () => {
                                 </div>
                                 <div className="truncate">
                                   <p className="font-bold text-sm truncate">{trx.note}</p>
-                                  <div className="flex items-center gap-1.5 text-xs text-gray-500"><MethodIcon method={trx.paymentMethod} size={12} /><span className="uppercase">{trx.paymentMethod}</span> • {trx.category}</div>
+                                  <div className="flex items-center gap-1.5 text-xs text-gray-500"><MethodIcon method={trx.paymentMethod} size={12} /><span className="uppercase">{getMethodLabel(trx.paymentMethod)}</span> • {trx.category}</div>
                                 </div>
                               </div>
                               <div className="text-right flex-shrink-0">
@@ -926,7 +644,7 @@ const handleExportPDF = () => {
               </div>
             )}
 
-            {/* --- TAB: PROFIL (FORM AUTHENTIKASI ASLI) --- */}
+            {/* --- TAB: PROFIL --- */}
             {activeTab === 'profil' && (
               <div className="animate-in fade-in slide-in-from-right-4 duration-500 py-6 mt-4 md:mt-0 relative">
                 <div className="absolute top-0 right-0 md:hidden">
@@ -1057,7 +775,7 @@ const handleExportPDF = () => {
                 </div>
                 <div className="p-5 md:p-7 space-y-5">
                   <div className="rounded-2xl bg-gray-50 dark:bg-[#131F37] p-4 border border-gray-100 dark:border-slate-800"><p className="text-[10px] uppercase tracking-widest text-gray-400 font-bold mb-2">Catatan transaksi</p><p className="text-lg font-bold leading-snug">{detailModalTx.note}</p></div>
-                  <div className="grid grid-cols-2 gap-3"><div className="rounded-2xl border border-gray-100 dark:border-slate-800 p-4"><div className="flex items-center gap-2 text-gray-400 mb-2"><CalendarDays size={15} /><span className="text-[10px] uppercase font-bold tracking-wider">Tanggal</span></div><p className="font-bold text-sm">{new Date(detailModalTx.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p></div><div className="rounded-2xl border border-gray-100 dark:border-slate-800 p-4"><div className="flex items-center gap-2 text-gray-400 mb-2"><CreditCard size={15} /><span className="text-[10px] uppercase font-bold tracking-wider">Metode</span></div><p className="font-bold text-sm uppercase">{detailModalTx.paymentMethod}</p></div></div>
+                  <div className="grid grid-cols-2 gap-3"><div className="rounded-2xl border border-gray-100 dark:border-slate-800 p-4"><div className="flex items-center gap-2 text-gray-400 mb-2"><CalendarDays size={15} /><span className="text-[10px] uppercase font-bold tracking-wider">Tanggal</span></div><p className="font-bold text-sm">{new Date(detailModalTx.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p></div><div className="rounded-2xl border border-gray-100 dark:border-slate-800 p-4"><div className="flex items-center gap-2 text-gray-400 mb-2"><CreditCard size={15} /><span className="text-[10px] uppercase font-bold tracking-wider">Dompet/Bank</span></div><p className="font-bold text-sm uppercase">{getMethodLabel(detailModalTx.paymentMethod)}</p></div></div>
                 </div>
               </div>
             </div>
@@ -1067,7 +785,6 @@ const handleExportPDF = () => {
         {/* TRANSACTION SHEET (FORM TAMBAH) */}
         {isAddSheetOpen && (() => {
           const meta = getCategoryMeta(addForm.category); const CategoryIcon = meta.icon; const categories = ['Makan & Minum', 'Transport', 'Belanja', 'Tagihan', 'Pendapatan', 'Lainnya'];
-          const methodsList = [{ id: 'qris', label: 'QRIS', icon: QrCode, sub: 'Pembayaran QR' }, { id: 'cash', label: 'Cash', icon: Banknote, sub: 'Uang tunai' }, { id: 'transfer', label: 'Transfer', icon: ArrowRightLeft, sub: 'Transfer bank' }];
           return (
             <div className="fixed inset-0 bg-[#020617]/75 z-[60] flex items-end md:items-center justify-center backdrop-blur-xl animate-in fade-in duration-300" onClick={() => setIsAddSheetOpen(false)}>
               <div className="bg-white dark:bg-[#0B152A] w-full max-w-md md:max-w-lg max-h-[96vh] overflow-y-auto rounded-t-[2rem] md:rounded-[2rem] shadow-2xl border border-white/10 animate-in slide-in-from-bottom-[100%] md:zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
@@ -1081,7 +798,7 @@ const handleExportPDF = () => {
                   <div className="text-center mb-5"><p className="text-[10px] uppercase tracking-[0.25em] text-gray-400 font-bold mb-1">Nominal</p><div className="flex items-center justify-center gap-1 min-h-[62px]"><span className="text-lg text-gray-400 font-bold self-center">Rp</span><input type="text" inputMode="numeric" autoFocus placeholder="0" className="bg-transparent outline-none w-full max-w-[220px] text-center text-5xl md:text-6xl font-black tracking-tight tabular-nums transition-all placeholder-gray-300 dark:placeholder-slate-700 text-gray-900 dark:text-white" value={addForm.amount ? new Intl.NumberFormat('id-ID').format(addForm.amount) : ''} onChange={(e) => { const rawValue = e.target.value.replace(/\D/g, ''); setAddForm(prev => ({...prev, amount: rawValue ? parseInt(rawValue, 10) : ''})); }} /></div></div>
                   <div className="mb-5"><div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">{categories.map(category => { const CIcon = getCategoryMeta(category).icon; return (<button key={category} onClick={() => setAddForm({...addForm, category})} className={`flex-shrink-0 flex items-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-bold transition-all active:scale-95 ${addForm.category === category ? 'border-blue-500 bg-blue-500/10 text-blue-500 shadow-sm' : 'border-gray-200 dark:border-slate-800 text-gray-500'}`}><CIcon size={15} /> {category}</button>); })}</div></div>
                   <div className="rounded-3xl bg-gray-50 dark:bg-[#101C32] border border-gray-100 dark:border-slate-800 p-3 mb-5"><div className="grid grid-cols-3">{['1','2','3','4','5','6','7','8','9','clear','0','backspace'].map(key => (<button key={key} onClick={() => handleAmountKey(key)} className="h-14 md:h-16 rounded-2xl flex items-center justify-center text-lg font-bold hover:bg-white dark:hover:bg-[#172542] active:scale-90 transition-all text-gray-900 dark:text-white">{key === 'backspace' ? <Delete size={20} /> : key === 'clear' ? <span className="text-sm text-gray-400">C</span> : key}</button>))}</div></div>
-                  <div className="relative mb-4"><button onClick={() => setPaymentMenuOpen(!paymentMenuOpen)} className="w-full rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-[#101C32] p-4 flex items-center gap-3 text-left hover:border-blue-500/50 transition-all"><div className="w-11 h-11 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center"><MethodIcon method={addForm.paymentMethod} size={20} /></div><div className="flex-1"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Metode pembayaran</p><p className="font-bold text-sm mt-0.5">{methodsList.find(m => m.id === addForm.paymentMethod)?.label}</p></div><ChevronDown size={18} className={`text-gray-400 transition-transform ${paymentMenuOpen ? 'rotate-180' : ''}`} /></button>{paymentMenuOpen && (<div className="absolute left-0 right-0 bottom-full mb-2 z-20 bg-white dark:bg-[#0E1A30] border border-gray-100 dark:border-slate-800 rounded-2xl shadow-2xl p-2 animate-in fade-in slide-in-from-bottom-2 duration-200">{methodsList.map(m => { const MIcon = m.icon; return <button key={m.id} onClick={() => { setAddForm({...addForm, paymentMethod: m.id}); setPaymentMenuOpen(false); }} className={`w-full p-3 rounded-xl flex items-center gap-3 text-left ${addForm.paymentMethod === m.id ? 'bg-blue-500/10 text-blue-500' : 'hover:bg-gray-50 dark:hover:bg-[#172542]'}`}><MIcon size={18} /><div><p className="text-sm font-bold">{m.label}</p><p className="text-[10px] text-gray-400">{m.sub}</p></div></button>; })}</div>)}</div>
+                  <div className="relative mb-4"><button onClick={() => setPaymentMenuOpen(!paymentMenuOpen)} className="w-full rounded-2xl border border-gray-100 dark:border-slate-800 bg-white dark:bg-[#101C32] p-4 flex items-center gap-3 text-left hover:border-blue-500/50 transition-all"><div className="w-11 h-11 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center"><MethodIcon method={addForm.paymentMethod} size={20} /></div><div className="flex-1"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Dompet / Bank</p><p className="font-bold text-sm mt-0.5">{getMethodLabel(addForm.paymentMethod)}</p></div><ChevronDown size={18} className={`text-gray-400 transition-transform ${paymentMenuOpen ? 'rotate-180' : ''}`} /></button>{paymentMenuOpen && (<div className="absolute left-0 right-0 bottom-full mb-2 z-20 bg-white dark:bg-[#0E1A30] border border-gray-100 dark:border-slate-800 rounded-2xl shadow-2xl p-2 animate-in fade-in slide-in-from-bottom-2 duration-200 max-h-56 overflow-y-auto">{BANKS.map(m => { const MIcon = m.icon; return <button key={m.id} onClick={() => { setAddForm({...addForm, paymentMethod: m.id}); setPaymentMenuOpen(false); }} className={`w-full p-3 rounded-xl flex items-center gap-3 text-left ${addForm.paymentMethod === m.id ? 'bg-blue-500/10 text-blue-500' : 'hover:bg-gray-50 dark:hover:bg-[#172542]'}`}><MIcon size={18} /><div><p className="text-sm font-bold">{m.label}</p><p className="text-[10px] text-gray-400">{m.sub}</p></div></button>; })}</div>)}</div>
                   <div className="grid grid-cols-2 gap-3 mb-4"><input type="date" className="w-full p-3.5 bg-gray-50 dark:bg-[#131F37] rounded-2xl border border-transparent focus:border-blue-500 outline-none text-xs dark:[color-scheme:dark]" value={addForm.date} onChange={(e) => setAddForm({...addForm, date: e.target.value})} /><input type="text" placeholder="Catatan..." className="w-full p-3.5 bg-gray-50 dark:bg-[#131F37] rounded-2xl outline-none text-xs border border-transparent focus:border-blue-500 text-gray-900 dark:text-white" value={addForm.note} onChange={(e) => setAddForm({...addForm, note: e.target.value})} /></div>
                   <button onClick={handleSave} className={`w-full text-white py-4 rounded-2xl font-black text-base flex items-center justify-center gap-3 active:scale-[0.98] transition-all shadow-xl ${addForm.type === 'expense' ? 'bg-[#162B49] shadow-slate-900/20' : 'bg-emerald-600 shadow-emerald-900/20'}`}>{addForm.id ? 'Perbarui Transaksi' : 'Simpan Transaksi'} <span className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center"><ChevronRight size={18} /></span></button>
                 </div>
