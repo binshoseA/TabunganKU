@@ -2,3 +2,121 @@
 
 /* Baris ini wajib ditambah agar Dark Mode bisa dikontrol pakai tombol */
 @variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --color-bg-light: #F8FAFC;
+    --color-card-light: #FFFFFF;
+    --color-border-light: #E2E8F0;
+    --color-text-main-light: #0F172A;
+    --color-text-muted-light: #64748B;
+
+    --color-bg-dark: #0A0F1D;
+    --color-card-dark: #121A2F;
+    --color-border-dark: rgba(255, 255, 255, 0.08);
+    --color-text-main-dark: #F8FAFC;
+    --color-text-muted-dark: #94A3B8;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+  }
+}
+
+/* Custom Scrollbar Hide */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Smooth micro-interaction transitions */
+.btn-press {
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.btn-press:active {
+  transform: scale(0.96);
+}
+
+.card-hover {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+}
+.card-hover:active {
+  transform: scale(0.99);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpModal {
+  from {
+    transform: translateY(100%);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDownToast {
+  0% {
+    transform: translate(-50%, -40px);
+    opacity: 0;
+  }
+  60% {
+    transform: translate(-50%, 6px);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleUpDialog {
+  0% {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes bounceSoft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideUpModal 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-toast {
+  animation: slideDownToast 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-dialog {
+  animation: scaleUpDialog 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-bounce-soft {
+  animation: bounceSoft 1.8s infinite ease-in-out;
+}
