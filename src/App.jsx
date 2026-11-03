@@ -84,6 +84,13 @@ export default function App() {
 
   // Supabase Auth & Session listener
   useEffect(() => {
+    // Check if URL contains recovery token from email
+    if (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery')) {
+      setIsRecoveryMode(true);
+      setActiveTab('profil');
+      showToast('Mode pemulihan: Silakan buat password baru.');
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
