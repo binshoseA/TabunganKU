@@ -45,6 +45,7 @@ export default function App() {
 
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [toast, setToast] = useState(null);
 
@@ -91,8 +92,13 @@ export default function App() {
       setIsLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+        setActiveTab('profil');
+        showToast('Mode pemulihan: Silakan buat password baru.');
+      }
       if (session) {
         fetchTransactions(session.user.id);
       } else {
@@ -149,7 +155,37 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setIsRecoveryMode(false);
     showToast('Berhasil keluar.');
+  };
+
+  const handleForgotPassword = async ({ email }) => {
+    setIsAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      showToast('Link reset password berhasil dikirim ke email!');
+    } catch (err) {
+      showToast(err.message || 'Gagal mengirim email reset password', 'error');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async ({ newPassword }) => {
+    setIsAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      showToast('Password baru berhasil disimpan! Silakan masuk kembali.');
+      setIsRecoveryMode(false);
+    } catch (err) {
+      showToast(err.message || 'Gagal mengubah password', 'error');
+    } finally {
+      setIsAuthLoading(false);
+    }
   };
 
   // Financial Balance & Wallets Calculation
@@ -504,6 +540,9 @@ export default function App() {
                 session={session}
                 onAuth={handleAuth}
                 onLogout={handleLogout}
+                onForgotPassword={handleForgotPassword}
+                onUpdatePassword={handleUpdatePassword}
+                isRecoveryMode={isRecoveryMode}
                 isAuthLoading={isAuthLoading}
                 onExportPDF={handleExportPDF}
                 logoSrc={LogoTabungan}
