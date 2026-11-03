@@ -84,8 +84,14 @@ export default function App() {
 
   // Supabase Auth & Session listener
   useEffect(() => {
-    // Check if URL contains recovery token from email
-    if (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery')) {
+    // Check if URL contains error (e.g. expired recovery link)
+    if (window.location.hash.includes('error=')) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const errorDesc = hashParams.get('error_description') || 'Tautan reset password sudah kadaluarsa atau tidak valid.';
+      showToast(decodeURIComponent(errorDesc.replace(/\+/g, ' ')), 'error');
+      setActiveTab('profil');
+      window.history.replaceState(null, '', window.location.pathname);
+    } else if (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery')) {
       setIsRecoveryMode(true);
       setActiveTab('profil');
       showToast('Mode pemulihan: Silakan buat password baru.');
@@ -160,6 +166,22 @@ export default function App() {
     }
   };
 
+  const handleOAuthLogin = async (provider = 'google') => {
+    setIsAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+    } catch (err) {
+      showToast(err.message || `Gagal login dengan ${provider}`, 'error');
+      setIsAuthLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsRecoveryMode(false);
@@ -188,6 +210,7 @@ export default function App() {
       if (error) throw error;
       showToast('Password baru berhasil disimpan! Silakan masuk kembali.');
       setIsRecoveryMode(false);
+      window.history.replaceState(null, '', window.location.pathname);
     } catch (err) {
       showToast(err.message || 'Gagal mengubah password', 'error');
     } finally {
@@ -546,6 +569,7 @@ export default function App() {
               <ProfileView
                 session={session}
                 onAuth={handleAuth}
+                onOAuthLogin={handleOAuthLogin}
                 onLogout={handleLogout}
                 onForgotPassword={handleForgotPassword}
                 onUpdatePassword={handleUpdatePassword}
